@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlowTask - Gestionnaire de Tâches Intelligent</title>
+    
+</head>
+<body>
+    <!-- Notification -->
+    <div class="notification" id="notification">
+        <span id="notificationText"></span>
+    </div>
+
+    <!-- Deadline Notification -->
+    <div class="deadline-notification" id="deadlineNotification">
+        <button class="close-btn" onclick="closeDeadlineNotification()">×</button>
+        <div id="deadlineNotificationContent"></div>
+    </div>
+
+    
+</body>
+</html> class="timer-btn" onclick="switchView('focus')">Commencer le focus</button>
+                            <button class="timer-btn" onclick="startTaskTimer(${selectedTask.id})">Démarrer le timer</button>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Show high priority tasks for today
+            const today = new Date();
+            const todaysTasks = tasks.filter(task => {
+                if (task.completed) return false;
+                
+                if (task.deadline) {
+                    const deadline = new Date(task.deadline);
+                    return deadline.toDateString() === today.toDateString();
+                }
+                
+                return task.priority === 'high';
+            }).slice(0, 3);
+            
+            if (todaysTasks.length > 0) {
+                container.innerHTML = `
+                    <div style="margin-bottom: 1rem;">
+                        <h4>Tâches prioritaires pour aujourd'hui:</h4>
+                    </div>
+                    ${todaysTasks.map(task => `
+                        <div class="task-card" style="margin-bottom: 0.5rem; cursor: pointer;" onclick="updateTodaysFocus(${JSON.stringify(task).replace(/"/g, '&quot;')})">
+                            <div style="display: flex; justify-content: between; align-items: center;">
+                                <span><strong>${escapeHtml(task.title)}</strong></span>
+                                <span class="task-badge">${getPriorityName(task.priority)}</span>
+                            </div>
+                        </div>
+                    `).join('')}
+                `;
+            } else {
+                container.innerHTML = '<p style="color: var(--text-secondary); text-align: center;">Aucune tâche prioritaire pour aujourd\'hui</p>';
+            }
+        }
+
+        function updateAdvancedStats() {
+            const completed = tasks.filter(t => t.completed);
+            const total = tasks.length;
+            
+            // Completion rate
+            const completionRate = total > 0 ? Math.round((completed.length / total) * 100) : 0;
+            document.getElementById('completionRate').textContent = completionRate + '%';
+            
+            // Average completion time
+            const avgTime = calculateAverageCompletionTime();
+            document.getElementById('avgCompletionTime').textContent = avgTime;
+            
+            // Tasks this week
+            const tasksThisWeek = getTasksThisWeek();
+            document.getElementById('tasksThisWeek').textContent = tasksThisWeek;
+            
+            // Best streak
+            document.getElementById('bestStreak').textContent = calculateBestStreak();
+            
+            // Total time spent
+            const totalTime = tasks.reduce((sum, task) => sum + (task.timeSpent || 0), 0);
+            const hours = Math.floor(totalTime / 3600);
+            document.getElementById('totalTimeSpent').textContent = `${hours}h`;
+            
+            // Average tasks per day
+            const daysActive = calculateActiveDays();
+            const avgTasksPerDay = daysActive > 0 ? Math.round(completed.length / daysActive * 10) / 10 : 0;
+            document.getElementById('avgTasksPerDay').textContent = avgTasksPerDay;
+        }
+
+        function calculateActiveDays() {
+            if (tasks.length === 0) return 0;
+            
+            const dates = new Set();
+            tasks.forEach(task => {
+                if (task.completedAt) {
+                    dates.add(new Date(task.completedAt).toDateString());
+                }
+            });
+            
+            return dates.size || 1;
+        }
+
+        function renderWeeklyProductivity() {
+            const container = document.getElementById('weeklyProductivity');
+            const now = new Date();
+            const weekData = [];
+            
+            for (let i = 6; i >= 0; i--) {
+                const date = new Date(now);
+                date.setDate(date.getDate() - i);
+                
+                const dayTasks = tasks.filter(task => {
+                    if (!task.completedAt) return false;
+                    return new Date(task.completedAt).toDateString() === date.toDateString();
+                }).length;
+                
+                weekData.push({
+                    day: date.toLocaleDateString('fr-FR', { weekday: 'short' }),
+                    count: dayTasks
+                });
+            }
+            
+            const maxCount = Math.max(...weekData.map(d => d.count), 1);
+            
+            container.innerHTML = `
+                <div style="display: flex; gap: 1rem; align-items: end; height: 100px;">
+                    ${weekData.map(day => `
+                        <div style="display: flex; flex-direction: column; align-items: center; flex: 1;">
+                            <div style="background: var(--theme-primary); width: 30px; height: ${(day.count / maxCount) * 70}px; margin-bottom: 0.5rem; border-radius: 4px; display: flex; align-items: end; justify-content: center; color: white; font-size: 0.8rem; font-weight: bold;">
+                                ${day.count > 0 ? day.count : ''}
+                            </div>
+                            <span style="font-size: 0.8rem; color: var(--text-secondary);">${day.day}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        // View Management
+        function switchView(viewName) {
+            console.log('Switching to view:', viewName);
+            
+            // Update navigation
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            event.target.closest('.nav-item').classList.add('active');
+            
+            // Update content
+            document.querySelectorAll('.view-section').forEach(section => {
+                section.classList.remove('active');
+            });
+            document.getElementById(viewName).classList.add('active');
+            
+            currentView = viewName;
+            
+            // Update view-specific content
+            if (viewName === 'calendar') {
+                renderCalendar();
+            } else if (viewName === 'stats') {
+                updateAdvancedStats();
+                renderCategoryStats();
+                renderWeeklyProductivity();
+            } else if (viewName === 'settings') {
+                updateSettingsUI();
+            } else if (viewName === 'focus') {
+                showHighPriorityTasks();
+            }
+        }
+
+        // Enhanced render functions with new features
+        function renderTasks() {
+            const container = document.getElementById('tasksContainer');
+            const filteredTasks = filterTasks();
+            
+            if (filteredTasks.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📋</div>
+                        <h3>Aucune tâche trouvée</h3>
+                        <p>Ajoutez une nouvelle tâche ou changez le filtre</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = filteredTasks.map(task => createTaskCard(task)).join('');
+        }
+
+        function createTaskCard(task) {
+            const now = new Date();
+            const deadline = task.deadline ? new Date(task.deadline) : null;
+            let urgencyClass = '';
+            
+            if (deadline && !task.completed) {
+                const hoursUntilDeadline = (deadline - now) / (1000 * 60 * 60);
+                if (hoursUntilDeadline < 0) {
+                    urgencyClass = 'overdue';
+                } else if (hoursUntilDeadline < 24) {
+                    urgencyClass = 'due-soon';
+                }
+            }
+            
+            const recurringIcon = task.recurring && task.recurring !== 'none' ? 
+                `<span class="task-badge" style="background: var(--theme-primary); color: white;">🔄 ${getRecurringName(task.recurring)}</span>` : '';
+            
+            const tagsHtml = task.tags && task.tags.length > 0 ? 
+                task.tags.map(tag => `<span class="task-badge" style="background: var(--secondary); color: white;">#${tag}</span>`).join('') : '';
+            
+            const timeSpentHtml = task.timeSpent > 0 ? 
+                `<span class="task-badge">⏱️ ${formatDuration(task.timeSpent)}</span>` : '';
+            
+            return `
+                <div class="task-card ${task.completed ? 'completed' : ''} ${urgencyClass}" 
+                     data-id="${task.id}" 
+                     draggable="true" 
+                     ondragstart="handleDragStart(event)" 
+                     ondragover="handleDragOver(event)" 
+                     ondrop="handleDrop(event)" 
+                     ondragend="handleDragEnd(event)">
+                    <div class="task-priority ${task.priority}"></div>
+                    <div class="task-header">
+                        <div style="flex: 1;">
+                            <h3 class="task-title">${escapeHtml(task.title)}</h3>
+                            <div class="task-meta">
+                                <span class="task-badge">${getCategoryIcon(task.category)} ${getCategoryName(task.category)}</span>
+                                <span class="task-badge">⚡ ${getPriorityName(task.priority)}</span>
+                                ${recurringIcon}
+                                ${task.deadline ? `<span class="task-badge">📅 ${formatDate(task.deadline)}</span>` : ''}
+                                ${task.estimatedTime ? `<span class="task-badge">⏳ ${task.estimatedTime}min</span>` : ''}
+                                ${timeSpentHtml}
+                                ${tagsHtml}
+                            </div>
+                            ${task.description ? `<p style="margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.9rem;">${escapeHtml(task.description)}</p>` : ''}
+                        </div>
+                        <div class="task-actions">
+                            <button class="task-btn" onclick="toggleTask(${task.id})" title="Marquer comme ${task.completed ? 'non terminée' : 'terminée'}">
+                                ${task.completed ? '↩️' : '✓'}
+                            </button>
+                            ${!task.completed ? `<button class="task-btn" onclick="startTaskTimer(${task.id})" title="Démarrer le timer">⏱️</button>` : ''}
+                            <button Header -->
+    <header>
+        <div class="header-content">
+            <div class="logo">
+                <div class="logo-icon">⚡</div>
+                <span>FlowTask</span>
+            </div>
+            <div class="header-controls">
+                <button class="notification-bell" onclick="toggleNotificationPanel()" title="Notifications">
+                    🔔
+                    <span class="notification-badge" id="notificationBadge" style="display: none;">0</span>
+                </button>
+                <button class="theme-toggle" onclick="toggleTheme()">🌙</button>
+                <button class="btn btn-secondary" onclick="exportTasks()">📥 Export</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Navigation -->
+    <nav>
+        <div class="nav-content">
+            <button class="nav-item active" onclick="switchView('dashboard')">
+                <div class="nav-icon">📊</div>
+                <span>Accueil</span>
+            </button>
+            <button class="nav-item" onclick="switchView('tasks')">
+                <div class="nav-icon">📋</div>
+                <span>Tâches</span>
+            </button>
+            <button class="nav-item" onclick="switchView('calendar')">
+                <div class="nav-icon">📅</div>
+                <span>Calendrier</span>
+            </button>
+            <button class="nav-item" onclick="switchView('timer')">
+                <div class="nav-icon">⏱️</div>
+                <span>Timer</span>
+            </button>
+            <button class="nav-item" onclick="switchView('focus')">
+                <div class="nav-icon">🎯</div>
+                <span>Focus</span>
+            </button>
+            <button class="nav-item" onclick="switchView('stats')">
+                <div class="nav-icon">📈</div>
+                <span>Stats</span>
+            </button>
+            <button class="nav-item" onclick="switchView('settings')">
+                <div class="nav-icon">⚙️</div>
+                <span>Réglages</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Quick Actions -->
+    <div class="quick-actions">
+        <button class="quick-action-btn" onclick="addQuickTask()" title="Ajouter une tâche rapide">+</button>
+        <button class="quick-action-btn" onclick="startQuickTimer()" title="Démarrer un timer rapide">⏱️</button>
+    </div>
+
+    <!-- Main Container -->
+    <div class="container">
+        <!-- Dashboard View -->
+        <div id="dashboard" class="view-section active">
+            <!-- Stats Dashboard -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">📋</div>
+                    <div class="stat-value" id="totalTasks">0</div>
+                    <div class="stat-label">Tâches totales</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">✅</div>
+                    <div class="stat-value" id="completedTasks">0</div>
+                    <div class="stat-label">Terminées</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">⏳</div>
+                    <div class="stat-value" id="pendingTasks">0</div>
+                    <div class="stat-label">En attente</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">🔥</div>
+                    <div class="stat-value" id="streakDays">0</div>
+                    <div class="stat-label">Série active</div>
+                </div>
+            </div>
+
+            <!-- Today's Focus -->
+            <div class="focus-mode" id="todaysFocus">
+                <h2 style="margin-bottom: 1rem;">🎯 Focus du jour</h2>
+                <div id="focusContent">
+                    <p style="color: var(--text-secondary); text-align: center;">Sélectionnez une tâche prioritaire pour aujourd'hui</p>
+                </div>
+            </div>
+
+            <!-- Task Input Section -->
+            <div class="task-input-section">
+                <h2 style="margin-bottom: 1.5rem;">➕ Nouvelle tâche</h2>
+                <div class="input-group">
+                    <div class="form-control">
+                        <label for="taskTitle">Titre de la tâche</label>
+                        <input type="text" id="taskTitle" placeholder="Ex: Finir le rapport...">
+                    </div>
+                    <div class="input-row">
+                        <div class="form-control">
+                            <label for="taskCategory">Catégorie</label>
+                            <select id="taskCategory">
+                                <option value="work">💼 Travail</option>
+                                <option value="personal">👤 Personnel</option>
+                                <option value="urgent">🚨 Urgent</option>
+                                <option value="shopping">🛒 Courses</option>
+                                <option value="health">💪 Santé</option>
+                                <option value="learning">📚 Apprentissage</option>
+                                <option value="family">👨‍👩‍👧‍👦 Famille</option>
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label for="taskPriority">Priorité</label>
+                            <select id="taskPriority">
+                                <option value="low">Faible</option>
+                                <option value="medium">Moyenne</option>
+                                <option value="high">Haute</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="input-row">
+                        <div class="form-control">
+                            <label for="taskDeadline">Échéance</label>
+                            <input type="datetime-local" id="taskDeadline">
+                        </div>
+                        <div class="form-control">
+                            <label for="taskRecurring">Récurrence</label>
+                            <select id="taskRecurring">
+                                <option value="none">Aucune</option>
+                                <option value="daily">Quotidienne</option>
+                                <option value="weekly">Hebdomadaire</option>
+                                <option value="monthly">Mensuelle</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="input-row">
+                        <div class="form-control">
+                            <label for="taskEstimatedTime">Temps estimé (minutes)</label>
+                            <input type="number" id="taskEstimatedTime" min="5" max="480" step="5" placeholder="25">
+                        </div>
+                        <div class="form-control">
+                            <label for="taskTags">Tags (séparés par des virgules)</label>
+                            <input type="text" id="taskTags" placeholder="important, urgent, facile">
+                        </div>
+                    </div>
+                    <div class="form-control">
+                        <label for="taskDescription">Description</label>
+                        <textarea id="taskDescription" placeholder="Détails de la tâche..."></textarea>
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="addTask()" style="background: var(--theme-gradient); color: white; width: 100%; border: none; transition: var(--transition);" onmouseover="this.style.background='var(--theme-gradient-hover)'; this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 15px rgba(0,0,0,0.2)'" onmouseout="this.style.background='var(--theme-gradient)'; this.style.transform='translateY(0)'; this.style.boxShadow='none'">
+                    <span>➕</span>
+                    <span>Ajouter la tâche</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Tasks View -->
+        <div id="tasks" class="view-section">
+            <!-- Search Bar -->
+            <div class="search-container">
+                <div class="search-icon">🔍</div>
+                <input type="text" class="search-input" id="searchInput" placeholder="Rechercher dans les tâches..." oninput="handleSearch()">
+            </div>
+            
+            <!-- Filters -->
+            <div class="filters">
+                <button class="filter-btn active" onclick="setFilter('all')">Toutes</button>
+                <button class="filter-btn" onclick="setFilter('today')">Aujourd'hui</button>
+                <button class="filter-btn" onclick="setFilter('week')">Cette semaine</button>
+                <button class="filter-btn" onclick="setFilter('overdue')">🚨 En retard</button>
+                <button class="filter-btn" onclick="setFilter('work')">💼 Travail</button>
+                <button class="filter-btn" onclick="setFilter('personal')">👤 Personnel</button>
+                <button class="filter-btn" onclick="setFilter('urgent')">🚨 Urgent</button>
+                <button class="filter-btn" onclick="setFilter('recurring')">🔄 Récurrentes</button>
+                <button class="filter-btn" onclick="setFilter('completed')">✅ Terminées</button>
+            </div>
+
+            <!-- Tasks Container -->
+            <div class="tasks-container" id="tasksContainer">
+                <div class="empty-state">
+                    <div class="empty-state-icon">📋</div>
+                    <h3>Aucune tâche pour le moment</h3>
+                    <p>Commencez par ajouter votre première tâche!</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Calendar View -->
+        <div id="calendar" class="view-section">
+            <div class="calendar-container">
+                <div class="calendar-header">
+                    <h2 id="calendarMonth">Janvier 2024</h2>
+                    <div class="calendar-nav">
+                        <button class="btn btn-secondary" onclick="previousMonth()">‹</button>
+                        <button class="btn btn-secondary" onclick="nextMonth()">›</button>
+                    </div>
+                </div>
+                <div class="calendar-grid" id="calendarGrid"></div>
+            </div>
+        </div>
+
+        <!-- Timer View -->
+        <div id="timer" class="view-section">
+            <div class="timer-section">
+                <div class="timer-card">
+                    <h2 style="margin-bottom: 1.5rem;">⏰ Timer Pomodoro</h2>
+                    <div class="timer-display" id="timerDisplay">25:00</div>
+                    <div class="timer-controls">
+                        <button class="timer-btn" onclick="startTimer()">▶️ Start</button>
+                        <button class="timer-btn" onclick="pauseTimer()">⏸️ Pause</button>
+                        <button class="timer-btn" onclick="resetTimer()">🔄 Reset</button>
+                    </div>
+                    <div class="timer-settings">
+                        <input type="number" class="timer-input" id="timerMinutes" value="25" min="1" max="60">
+                        <span style="color: var(--text-secondary);">minutes</span>
+                        <button class="timer-btn" onclick="setTimer()">Définir</button>
+                    </div>
+                </div>
+
+                <!-- Active Task Timer -->
+                <div class="timer-card" id="activeTaskTimer" style="display: none;">
+                    <h3>📊 Tâche en cours</h3>
+                    <div id="activeTaskTitle" style="margin: 1rem 0; font-weight: bold;"></div>
+                    <div class="time-tracking">
+                        <span>Temps écoulé:</span>
+                        <span class="time-display" id="taskTimeDisplay">00:00:00</span>
+                    </div>
+                    <div style="margin-top: 1rem;">
+                        <button class="timer-btn" onclick="stopTaskTimer()">Arrêter</button>
+                        <button class="timer-btn" onclick="completeActiveTask()">Terminer la tâche</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Focus Mode View -->
+        <div id="focus" class="view-section">
+            <div class="focus-mode">
+                <h2 style="margin-bottom: 1.5rem;">🎯 Mode Focus</h2>
+                <div id="focusTaskContainer">
+                    <p style="color: var(--text-secondary); text-align: center; margin: 2rem 0;">
+                        Sélectionnez une tâche à partir de votre liste pour commencer une session de focus
+                    </p>
+                    <div class="focus-controls">
+                        <button class="timer-btn" onclick="selectFocusTask()">Choisir une tâche</button>
+                        <button class="timer-btn" onclick="showHighPriorityTasks()">Tâches prioritaires</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Focus Session -->
+            <div id="focusSession" style="display: none;">
+                <div class="focus-task" id="currentFocusTask">
+                    <h3 id="focusTaskTitle"></h3>
+                    <p id="focusTaskDescription"></p>
+                    <div class="time-tracking">
+                        <span>Session:</span>
+                        <span class="time-display" id="focusTimeDisplay">00:00</span>
+                    </div>
+                </div>
+                <div class="focus-controls">
+                    <button class="timer-btn" onclick="startFocusSession()">Commencer</button>
+                    <button class="timer-btn" onclick="pauseFocusSession()">Pause</button>
+                    <button class="timer-btn" onclick="completeFocusTask()">Terminer</button>
+                    <button class="timer-btn" onclick="endFocusSession()">Quitter</button>
+                </div>
+            </div>
+
+            <!-- Today's Focus Tasks -->
+            <div class="task-input-section">
+                <h3 style="margin-bottom: 1rem;">📅 Tâches prioritaires aujourd'hui</h3>
+                <div id="priorityTasksList"></div>
+            </div>
+        </div>
+
+        <!-- Statistics View -->
+        <div id="stats" class="view-section">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">⚡</div>
+                    <div class="stat-value" id="avgCompletionTime">-</div>
+                    <div class="stat-label">Temps moyen (jours)</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">🎯</div>
+                    <div class="stat-value" id="completionRate">0%</div>
+                    <div class="stat-label">Taux de réussite</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">📊</div>
+                    <div class="stat-value" id="tasksThisWeek">0</div>
+                    <div class="stat-label">Cette semaine</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">🏆</div>
+                    <div class="stat-value" id="bestStreak">0</div>
+                    <div class="stat-label">Meilleure série</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">⏱️</div>
+                    <div class="stat-value" id="totalTimeSpent">0h</div>
+                    <div class="stat-label">Temps total</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">🔄</div>
+                    <div class="stat-value" id="avgTasksPerDay">0</div>
+                    <div class="stat-label">Tâches/jour</div>
+                </div>
+            </div>
+
+            <div class="task-input-section">
+                <h2 style="margin-bottom: 1.5rem;">📊 Répartition par catégorie</h2>
+                <div id="categoryStats"></div>
+            </div>
+
+            <div class="task-input-section">
+                <h3 style="margin-bottom: 1rem;">📈 Productivité cette semaine</h3>
+                <div id="weeklyProductivity"></div>
+            </div>
+        </div>
+
+        <!-- Settings View -->
+        <div id="settings" class="view-section">
+            <div class="settings-section">
+                <div class="settings-card">
+                    <h2 style="margin-bottom: 1.5rem;">⚙️ Paramètres généraux</h2>
+                    
+                    <div class="settings-item">
+                        <div>
+                            <div class="settings-label">Notifications de tâches</div>
+                            <div class="settings-description">Recevoir des notifications pour les échéances</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="notificationsEnabled" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-item">
+                        <div>
+                            <div class="settings-label">Notifications anticipées</div>
+                            <div class="settings-description">Temps d'avance pour les notifications</div>
+                        </div>
+                        <select id="notificationAdvanceTime" style="width: 120px;">
+                            <option value="5">5 minutes</option>
+                            <option value="15">15 minutes</option>
+                            <option value="30" selected>30 minutes</option>
+                            <option value="60">1 heure</option>
+                            <option value="120">2 heures</option>
+                            <option value="360">6 heures</option>
+                            <option value="1440">1 jour</option>
+                        </select>
+                    </div>
+
+                    <div class="settings-item">
+                        <div>
+                            <div class="settings-label">Son du timer</div>
+                            <div class="settings-description">Son à la fin du timer Pomodoro</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="timerSoundEnabled" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-item">
+                        <div>
+                            <div class="settings-label">Suivi du temps automatique</div>
+                            <div class="settings-description">Démarrer automatiquement le suivi du temps</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="autoTimeTracking" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-item">
+                        <div>
+                            <div class="settings-label">Confirmation de suppression</div>
+                            <div class="settings-description">Demander confirmation avant de supprimer une tâche</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="deleteConfirmationEnabled" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-item">
+                        <div>
+                            <div class="settings-label">Animations de célébration</div>
+                            <div class="settings-description">Animations quand une tâche est terminée</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="celebrationEnabled" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-item">
+                        <div>
+                            <div class="settings-label">Timer par défaut</div>
+                            <div class="settings-description">Durée par défaut du timer Pomodoro</div>
+                        </div>
+                        <select id="defaultTimerDuration" style="width: 120px;">
+                            <option value="15">15 minutes</option>
+                            <option value="20">20 minutes</option>
+                            <option value="25" selected>25 minutes</option>
+                            <option value="30">30 minutes</option>
+                            <option value="45">45 minutes</option>
+                            <option value="60">60 minutes</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="settings-card">
+                    <h2 style="margin-bottom: 1.5rem;">🎨 Thème de couleurs</h2>
+                    
+                    <div class="settings-item">
+                        <div>
+                            <div class="settings-label">Palette de couleurs</div>
+                            <div class="settings-description">Choisissez votre thème de couleurs préféré</div>
+                        </div>
+                    </div>
+                    
+                    <div class="color-themes">
+                        <div class="color-theme-option active" onclick="setColorTheme('blue')" data-theme="blue">
+                            <div class="theme-preview" style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);"></div>
+                            <div class="theme-name">Bleu Océan</div>
+                        </div>
+                        
+                        <div class="color-theme-option" onclick="setColorTheme('emerald')" data-theme="emerald">
+                            <div class="theme-preview" style="background: linear-gradient(135deg, #10b981 0%, #34d399 100%);"></div>
+                            <div class="theme-name">Émeraude</div>
+                        </div>
+                        
+                        <div class="color-theme-option" onclick="setColorTheme('sunset')" data-theme="sunset">
+                            <div class="theme-preview" style="background: linear-gradient(135deg, #f59e0b 0%, #f97316 100%);"></div>
+                            <div class="theme-name">Coucher Soleil</div>
+                        </div>
+                        
+                        <div class="color-theme-option" onclick="setColorTheme('rose')" data-theme="rose">
+                            <div class="theme-preview" style="background: linear-gradient(135deg, #ec4899 0%, #f472b6 100%);"></div>
+                            <div class="theme-name">Rose Passion</div>
+                        </div>
+                        
+                        <div class="color-theme-option" onclick="setColorTheme('purple')" data-theme="purple">
+                            <div class="theme-preview" style="background: linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%);"></div>
+                            <div class="theme-name">Violet Royal</div>
+                        </div>
+                        
+                        <div class="color-theme-option" onclick="setColorTheme('teal')" data-theme="teal">
+                            <div class="theme-preview" style="background: linear-gradient(135deg, #14b8a6 0%, #06b6d4 100%);"></div>
+                            <div class="theme-name">Turquoise</div>
+                        </div>
+                        
+                        <div class="color-theme-option" onclick="setColorTheme('red')" data-theme="red">
+                            <div class="theme-preview" style="background: linear-gradient(135deg, #ef4444 0%, #f87171 100%);"></div>
+                            <div class="theme-name">Rouge Feu</div>
+                        </div>
+                        
+                        <div class="color-theme-option" onclick="setColorTheme('dark')" data-theme="dark">
+                            <div class="theme-preview" style="background: linear-gradient(135deg, #374151 0%, #6b7280 100%);"></div>
+                            <div class="theme-name">Gris Sombre</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-card">
+                    <h2 style="margin-bottom: 1.5rem;">📱 Interface</h2>
+                    
+                    <div class="settings-item">
+                        <div>
+                            <div class="settings-label">Thème sombre</div>
+                            <div class="settings-description">Utiliser le thème sombre pour l'interface</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="darkModeToggle" onchange="toggleDarkMode()">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-item">
+                        <div>
+                            <div class="settings-label">Vue par défaut</div>
+                            <div class="settings-description">Page affichée au démarrage</div>
+                        </div>
+                        <select id="defaultView" style="width: 120px;">
+                            <option value="dashboard" selected>Accueil</option>
+                            <option value="tasks">Tâches</option>
+                            <option value="calendar">Calendrier</option>
+                            <option value="timer">Timer</option>
+                            <option value="focus">Focus</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="danger-zone">
+                    <div class="danger-title">
+                        <span>⚠️</span>
+                        <span>Zone dangereuse</span>
+                    </div>
+                    <p style="margin-bottom: 1rem; color: var(--text-secondary);">
+                        Ces actions sont irréversibles. Soyez prudent.
+                    </p>
+                    <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                        <button class="btn btn-danger" onclick="clearCompletedTasks()">
+                            🗑️ Supprimer les tâches terminées
+                        </button>
+                        <button class="btn btn-danger" onclick="resetAllData()">
+                            💥 Réinitialiser toutes les données
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!--
